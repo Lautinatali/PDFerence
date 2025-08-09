@@ -1,8 +1,11 @@
+
 import requests
 import re
 import os
 from pathlib import Path
 import fitz # PyMuPDF
+# Import note functions from import_requests.py, use alias to avoid name conflict
+from import_requests import get_metadata_from_doi as note_get_metadata_from_doi, format_metadata_as_markdown, save_note_as_markdown
 
 
 def clean_for_filename(text):
@@ -67,8 +70,6 @@ def rename_pdfs_in_folder(folder_path):
     input_folder.mkdir(exist_ok=True)
     error_folder.mkdir(exist_ok=True)
 
-    # Import note functions from import requests.py
-    from import requests import format_metadata_as_markdown, save_note_as_markdown
 
     for pdf_file in folder.glob("*.pdf"):
         print(f"📄 Procesando: {pdf_file.name}")
@@ -97,26 +98,35 @@ def rename_pdfs_in_folder(folder_path):
             pdf_file.rename(new_path)
             print(f"   ✅ Renombrado a: {new_name} y movido a Input/")
 
-            # Crear y guardar la nota Markdown
-            md_content = format_metadata_as_markdown(metadata)
-            save_note_as_markdown(md_content, metadata, input_folder)
+            # Después de procesar el PDF, crear la nota usando la función externa
+            try:
+                note_metadata = note_get_metadata_from_doi(doi)
+                md_content = format_metadata_as_markdown(note_metadata)
+                output_dir = r"G:\Mi unidad\Input_network\Input_network"  # Hardcoded path
+                save_note_as_markdown(md_content, note_metadata, output_dir)
+            except Exception as note_e:
+                print(f"   ⚠️ Error al crear la nota Markdown: {note_e}")
 
         except ValueError as ve:
             print(f"   ❌ Error de metadatos: {ve}")
-            dest = error_folder / pdf_file.name
-            pdf_file.rename(dest)
+            if pdf_file.exists():
+                dest = error_folder / pdf_file.name
+                pdf_file.rename(dest)
         except FileExistsError:
             print(f"   ⚠️ Ya existe un archivo con el nombre: {new_name}")
-            dest = error_folder / pdf_file.name
-            pdf_file.rename(dest)
+            if pdf_file.exists():
+                dest = error_folder / pdf_file.name
+                pdf_file.rename(dest)
         except OSError as oe:
             print(f"   ❌ Error al renombrar '{pdf_file.name}': {oe}")
-            dest = error_folder / pdf_file.name
-            pdf_file.rename(dest)
+            if pdf_file.exists():
+                dest = error_folder / pdf_file.name
+                pdf_file.rename(dest)
         except Exception as e:
             print(f"   ❌ Error inesperado: {e}")
-            dest = error_folder / pdf_file.name
-            pdf_file.rename(dest)
+            if pdf_file.exists():
+                dest = error_folder / pdf_file.name
+                pdf_file.rename(dest)
 
 
 

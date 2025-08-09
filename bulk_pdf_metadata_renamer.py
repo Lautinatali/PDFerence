@@ -67,6 +67,9 @@ def rename_pdfs_in_folder(folder_path):
     input_folder.mkdir(exist_ok=True)
     error_folder.mkdir(exist_ok=True)
 
+    # Import note functions from import requests.py
+    from import requests import format_metadata_as_markdown, save_note_as_markdown
+
     for pdf_file in folder.glob("*.pdf"):
         print(f"📄 Procesando: {pdf_file.name}")
         doi = extract_doi_from_pdf(pdf_file)
@@ -93,6 +96,10 @@ def rename_pdfs_in_folder(folder_path):
             # o .rename() si quieres que falle si el archivo ya existe
             pdf_file.rename(new_path)
             print(f"   ✅ Renombrado a: {new_name} y movido a Input/")
+
+            # Crear y guardar la nota Markdown
+            md_content = format_metadata_as_markdown(metadata)
+            save_note_as_markdown(md_content, metadata, input_folder)
 
         except ValueError as ve:
             print(f"   ❌ Error de metadatos: {ve}")

@@ -86,7 +86,7 @@ def main():
     if not doi:
         print("❌ No DOI ingresado. Saliendo.")
         return
-    output_dir = r"G:\Mi unidad\Zettelkasten\Zettelkasten\Rough Notes"  # Hardcoded path
+    output_dir = r"G:\Mi unidad\Input_network\Input"  # Hardcoded path
 
     try:
         metadata = get_metadata_from_doi(doi.strip())

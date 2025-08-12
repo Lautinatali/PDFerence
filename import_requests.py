@@ -40,20 +40,18 @@ journal: "{metadata['journal']}"
 year: {metadata['year']}
 doi: {metadata['doi']}
 url: {metadata['url']}
-tags: [paper]
+tags: [unread]
 ---
 
-# 📄 Resumen
+# 📄 Abstract
 
 {metadata['abstract']}
 
-# 🧠 Notas personales
+# 🧠 Personal Notes
 
 - 
 
-# 🔗 Enlaces
-
-[{metadata['url']}]({metadata['url']})
+# 🔗 Why does it matter?
 """
     return md
 

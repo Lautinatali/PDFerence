@@ -71,7 +71,11 @@ def rename_pdfs_in_folder(folder_path):
     error_folder.mkdir(exist_ok=True)
 
 
+    processed = 0
+    success = 0
+    failed = 0
     for pdf_file in folder.glob("*.pdf"):
+        processed += 1
         print(f"📄 Procesando: {pdf_file.name}")
         doi = extract_doi_from_pdf(pdf_file)
         if doi and doi[-1] in ".);":
@@ -83,6 +87,7 @@ def rename_pdfs_in_folder(folder_path):
             # Mover a Error
             dest = error_folder / pdf_file.name
             pdf_file.rename(dest)
+            failed += 1
             continue
 
         try:
@@ -107,26 +112,38 @@ def rename_pdfs_in_folder(folder_path):
             except Exception as note_e:
                 print(f"   ⚠️ Error al crear la nota Markdown: {note_e}")
 
+            success += 1
+
         except ValueError as ve:
             print(f"   ❌ Error de metadatos: {ve}")
             if pdf_file.exists():
                 dest = error_folder / pdf_file.name
                 pdf_file.rename(dest)
+            failed += 1
         except FileExistsError:
             print(f"   ⚠️ Ya existe un archivo con el nombre: {new_name}")
             if pdf_file.exists():
                 dest = error_folder / pdf_file.name
                 pdf_file.rename(dest)
+            failed += 1
         except OSError as oe:
             print(f"   ❌ Error al renombrar '{pdf_file.name}': {oe}")
             if pdf_file.exists():
                 dest = error_folder / pdf_file.name
                 pdf_file.rename(dest)
+            failed += 1
         except Exception as e:
             print(f"   ❌ Error inesperado: {e}")
             if pdf_file.exists():
                 dest = error_folder / pdf_file.name
                 pdf_file.rename(dest)
+            failed += 1
+
+    # Logger: append summary to log file
+    log_path = folder / "process_log.txt"
+    from datetime import datetime
+    with open(log_path, "a", encoding="utf-8") as logf:
+        logf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processed: {processed}, Success: {success}, Failed: {failed}\n")
 
 
 

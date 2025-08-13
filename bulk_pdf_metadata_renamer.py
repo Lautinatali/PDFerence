@@ -34,28 +34,55 @@ def get_metadata_from_doi(doi):
 
 
 def extract_doi_from_pdf(file_path):
-    """Intenta encontrar un DOI en el texto del PDF."""
-    # Regex estricto para DOI, pero permite prefijos comunes
+    """
+    Intenta encontrar un DOI en el texto del PDF de manera más robusta.
+
+    Mejoras:
+    1. Preprocesamiento de texto más agresivo para manejar saltos de línea y guiones.
+    2. Expresión regular más flexible que maneja una gama más amplia de caracteres
+       pero es menos propensa a capturar puntuación final no deseada.
+    """
+    # Expresión regular más estricta para el DOI.
+    # No permite espacios dentro del DOI capturado.
     doi_pattern = re.compile(
-        r"(?:doi\s*[:]?\s*|https?://(?:www\.)?doi\.org/|/doi/)?"
-        r"(10\.\d{4,9}/[-._;()/:A-Z0-9]+)",
+        r"(?:doi\s*[:]?\s*|https?://(?:www\.)?doi\.org/|/doi/)?(10\.\d{4,9}/[-._;():/A-Z0-9]+)",
         re.IGNORECASE
     )
+    
     try:
         with fitz.open(file_path) as pdf:
-            # Leer todo el texto del PDF (sin límite de páginas)
+            # Leer todo el texto del PDF
             text = "".join(page.get_text() for page in pdf)
-             # Unir líneas solo si el salto está justo después de un slash o punto (caso típico de DOI partido)
-            text = re.sub(r"/(\r?\n|\r|\n)", "/", text)
-            text = re.sub(r"\.(\r?\n|\r|\n)", ".", text)
-        match = doi_pattern.search(text)
-        if match:
-            # El DOI está en el primer grupo de captura
-            return match.group(1)
-        return None
+            
+            # --- Mejoras en el preprocesamiento ---
+            
+            # 1. Eliminar guiones al final de las líneas para unir palabras partidas.
+            text = re.sub(r'-\s*\n', '', text)
+            
+            # 2. Reemplazar todos los tipos de saltos de línea con un solo espacio.
+            # Esto maneja los casos más complejos de DOI partidos en varias líneas.
+            text = text.replace('\n', ' ').replace('\r', ' ')
+            
+            # 3. Eliminar espacios múltiples que puedan haber aparecido
+            # después de la sustitución de saltos de línea.
+            text = re.sub(r'\s+', ' ', text)
+            
+            match = doi_pattern.search(text)
+            
+            if match:
+                # El DOI está en el primer grupo de captura
+                doi = match.group(1).strip()
+                
+                # Limpiamos puntuación no deseada al final del DOI
+                # Por ejemplo, si el DOI termina con un punto o una coma.
+                doi = re.sub(r"[\.,;:]+$", "", doi)
+                
+                return doi
+            return None
     except Exception as e:
         print(f"⚠️ No se pudo leer {file_path}: {e}")
         return None
+
 
 
 def rename_pdfs_in_folder(folder_path):

@@ -178,7 +178,7 @@ def rename_pdfs_in_folder(folder_path):
 
 if __name__ == "__main__":
     # Cambiar a tu carpeta real
-    folder_to_process = r"H:\Mi unidad\IMMF\3 - Bibliografía\Unsorted"
+    folder_to_process = r"I:\Mi unidad\IMMF\3 - Bibliografía\Unsorted"
     rename_pdfs_in_folder(folder_to_process)
     #metadata1 = get_metadata_from_doi("10.1161/CIRCRESAHA.116.310091")
     #print(metadata1)

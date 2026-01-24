@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import fitz # PyMuPDF
 # Import note functions from import_requests.py, use alias to avoid name conflict
-from import_requests import get_metadata_from_doi as note_get_metadata_from_doi, format_metadata_as_markdown, save_note_as_markdown
+from import_requests import get_metadata_from_doi as note_get_metadata_from_doi, format_metadata_as_markdown, save_note_as_markdown, get_metadata_from_openalex
 
 
 def clean_for_filename(text):
@@ -132,7 +132,7 @@ def rename_pdfs_in_folder(folder_path):
 
             # Después de procesar el PDF, crear la nota usando la función externa
             try:
-                note_metadata = note_get_metadata_from_doi(doi)
+                note_metadata = get_metadata_from_openalex(doi)
                 md_content = format_metadata_as_markdown(note_metadata)
                 output_dir = r"G:\Mi unidad\Input_network\Input_network"  # Hardcoded path
                 save_note_as_markdown(md_content, note_metadata, output_dir)

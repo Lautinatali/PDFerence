@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import tkinter as tk
 from tkinter import simpledialog
+from bs4 import BeautifulSoup
 
 def clean_for_filename(text):
     """Limpia el texto para que sea válido como nombre de archivo."""
@@ -31,6 +32,117 @@ def get_metadata_from_doi(doi):
 
     return metadata
 
+
+
+def get_abstract_from_api(doi, email="lnatali@immf.uncor.edu"):
+    """
+    Fetches ONLY the abstract text from PubMed using XML parsing.
+    """
+    # 1. Search for the PMID using the DOI
+    search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+    params = {
+        "db": "pubmed",
+        "term": doi,
+        "retmode": "json",
+        "email": email
+    }
+    
+    try:
+        # Step A: Get the ID (PMID)
+        r = requests.get(search_url, params=params, timeout=10)
+        if r.status_code != 200: return None
+        
+        data = r.json()
+        id_list = data.get("esearchresult", {}).get("idlist", [])
+        
+        if not id_list:
+            return None # DOI not found in PubMed
+        
+        pmid = id_list[0]
+        
+        # Step B: Fetch the XML record for that PMID
+        fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+        fetch_params = {
+            "db": "pubmed",
+            "id": pmid,
+            "retmode": "xml",  # <--- This is the key change!
+            "email": email
+        }
+        
+        xml_resp = requests.get(fetch_url, params=fetch_params, timeout=10)
+        
+        if xml_resp.status_code == 200:
+            # Parse XML with BeautifulSoup
+            soup = BeautifulSoup(xml_resp.content, "xml")
+            
+            # Extract text from <AbstractText> tags
+            # Sometimes abstracts are split into sections (Background, Methods, etc.)
+            abstract_tags = soup.find_all("AbstractText")
+            
+            if abstract_tags:
+                # Join all sections with a space
+                full_abstract = " ".join([tag.get_text(strip=True) for tag in abstract_tags])
+                return full_abstract
+            
+    except Exception as e:
+        print(f"⚠️ API Error: {e}")
+        
+    return None
+
+def get_metadata_from_openalex(doi, email="lnatali@immf.uncor.edu"):
+    """Fetch metadata from OpenAlex and rebuild the abstract."""
+    # Ensure the DOI is just the identifier
+    clean_doi = doi.replace("https://doi.org/", "")
+    url = f"https://api.openalex.org/works/https://doi.org/{clean_doi}?mailto={email}"
+    
+    r = requests.get(url)
+    if r.status_code != 200:
+        return {"error": f"Error {r.status_code}: Could not find DOI or API error."}
+    
+    data = r.json()
+
+    metadata = {
+        "title": data.get("display_name", ""),
+        "authors": [a.get("author", {}).get("display_name", "") for a in data.get("authorships", [])],
+        "journal": data.get("primary_location", {}).get("source", {}).get("display_name", ""),
+        "year": data.get("publication_year"),
+        "doi": data.get("doi", ""),
+        "url": data.get("doi", f"https://doi.org/{clean_doi}"),
+        "abstract": data.get("abstract"),
+        "topics": [t.get("display_name") for t in data.get("topics", [])] # Bonus: OpenAlex tags
+    }
+
+    # Helper to rebuild abstract from inverted index
+    def rebuild_abstract(index):
+        if not index:
+            return "No abstract available."
+        # Create a list with enough space for all words
+        # The index is { "Word": [pos1, pos2], ... }
+        word_positions = []
+        for word, positions in index.items():
+            for pos in positions:
+                word_positions.append((pos, word))
+        
+        # Sort by position and join
+        word_positions.sort()
+        return " ".join([word for pos, word in word_positions])
+    
+    # 1. Try OpenAlex Abstract
+    abstract = rebuild_abstract(data.get("abstract_inverted_index"))
+
+    # 2. Plan B: PubMed (High success rate for Bio/Med)
+    if not abstract or "No abstract available" in abstract:
+        print(f"🔍 Abstract missing in OpenAlex. Trying Plan B (PubMed)...")
+        abstract = get_abstract_from_api(clean_doi)
+
+    # Final fallback
+    if not abstract:
+        abstract = "Abstract truly unavailable."
+
+    metadata["abstract"] = abstract
+    return metadata
+
+
 def format_metadata_as_markdown(metadata):
     """Convierte los metadatos en un string en formato Markdown."""
     md = f"""---
@@ -39,8 +151,9 @@ authors: {metadata['authors']}
 journal: "{metadata['journal']}"
 year: {metadata['year']}
 doi: {metadata['doi']}
-url: {metadata['url']}
+topics: {metadata.get('topics', [])}
 tags: [unread]
+
 ---
 
 # 📄 Abstract
@@ -58,7 +171,7 @@ tags: [unread]
 
 def save_note_as_markdown(content, metadata, output_dir):
     """Guarda el contenido Markdown como archivo .md"""
-    first_author = metadata['authors'][0].split(",")[0] if metadata['authors'] else "unknown"
+    first_author = metadata['authors'][0].split()[-1]
     safe_title = clean_for_filename(metadata['title'])
     filename = f"{first_author} {metadata['year']} - {safe_title}.md"
     path = Path(output_dir) / filename

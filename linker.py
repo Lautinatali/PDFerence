@@ -1,5 +1,4 @@
 import re
-import os
 from pathlib import Path
 
 # --- CONFIGURACIÓN DEL USUARIO ---
@@ -12,10 +11,10 @@ KEYWORDS_TO_LINK = [
     'SMC',
     'METTL3',
     'YTHDF2',
-    'm6A Modification',
+    'YTHDF',
     'Autophagy',
-    'miR-143/145',
-    'Notch Signaling'
+    'm6A',
+    'Notch'
 ]
 
 def apply_links_to_content(content, keywords):

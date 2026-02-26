@@ -1,0 +1,21 @@
+# Core dependencies
+requests>=2.31.0
+PyMuPDF>=1.23.0  # fitz for PDF reading
+beautifulsoup4>=4.12.0  # XML/HTML parsing
+python-dotenv>=1.0.0
+
+# UI
+streamlit>=1.28.0
+
+# Development and testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0  # Code formatter
+flake8>=6.0.0  # Linter
+mypy>=1.0.0    # Type checker
+
+# Optional: for better PDF metadata extraction
+pdfminer.six>=20221105  # Alternative PDF parser
+
+# Optional: for better logging
+colorlog>=6.7.0

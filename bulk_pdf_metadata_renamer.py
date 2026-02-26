@@ -94,13 +94,16 @@ def rename_pdfs_in_folder(folder_path):
 
     input_folder = folder / "Input"
     error_folder = folder / "Error"
+    duplicates_folder = folder / "Duplicates"
     input_folder.mkdir(exist_ok=True)
     error_folder.mkdir(exist_ok=True)
+    duplicates_folder.mkdir(exist_ok=True)
 
 
     processed = 0
     success = 0
     failed = 0
+    duplicates = 0
     for pdf_file in folder.glob("*.pdf"):
         processed += 1
         print(f"📄 Procesando: {pdf_file.name}")
@@ -150,9 +153,9 @@ def rename_pdfs_in_folder(folder_path):
         except FileExistsError:
             print(f"   ⚠️ Ya existe un archivo con el nombre: {new_name}")
             if pdf_file.exists():
-                dest = error_folder / pdf_file.name
+                dest = duplicates_folder / pdf_file.name
                 pdf_file.rename(dest)
-            failed += 1
+            duplicates += 1
         except OSError as oe:
             print(f"   ❌ Error al renombrar '{pdf_file.name}': {oe}")
             if pdf_file.exists():
@@ -170,7 +173,7 @@ def rename_pdfs_in_folder(folder_path):
     log_path = folder / "process_log.txt"
     from datetime import datetime
     with open(log_path, "a", encoding="utf-8") as logf:
-        logf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processed: {processed}, Success: {success}, Failed: {failed}\n")
+        logf.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processed: {processed}, Success: {success}, Failed: {failed}, Duplicates: {duplicates}\n")
 
 
 

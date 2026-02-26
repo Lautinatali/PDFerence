@@ -25,6 +25,7 @@ defaults = {
     "obsidian_path": "",
     "log_lines": [],
     "stats": {"processed": 0, "success": 0, "failed": 0, "duplicates": 0},
+    "processing_done": False,   # guard: prevents re-running process_folder on rerun
     # keyword stage
     "keyword_freq": {},       # {word: count}
     "selected_keywords": set(),
@@ -150,13 +151,28 @@ def process_folder(folder_path: str, obsidian_path: str, log_box):
         try:
             note_metadata = get_metadata_from_openalex(doi)
             md_content    = format_metadata_as_markdown(note_metadata)
-            save_note_as_markdown(md_content, note_metadata, obsidian_path)
-            log(f"   📝  Obsidian note created")
 
-            # Harvest keywords from abstract for the keyword stage
+            # Snapshot existing .md files so we can detect which one is new
+            obsidian_dir = Path(obsidian_path)
+            before = set(obsidian_dir.glob("*.md"))
+
+            save_note_as_markdown(md_content, note_metadata, obsidian_path)
+
+            # Detect the actual file that was written — don't guess the name
+            after   = set(obsidian_dir.glob("*.md"))
+            new_mds = after - before
+            if new_mds:
+                actual_md_path = max(new_mds, key=lambda p: p.stat().st_mtime)
+            else:
+                # Note already existed and was updated in-place; find by newest mtime
+                actual_md_path = max(after, key=lambda p: p.stat().st_mtime)
+
+            log(f"   📝  Obsidian note → {actual_md_path.name}")
+
+            # Harvest keywords from abstract + title using the full n-gram pipeline
             abstract = note_metadata.get("abstract", "") or ""
-            words = _extract_candidate_words(abstract + " " + note_metadata.get("title", ""))
-            keyword_freq.update(words)
+            title    = note_metadata.get("title", safe_title) or ""
+            keyword_freq.update(extract_keywords_from_text(abstract + " " + title))
 
             processed_papers.append({
                 "doi": doi,
@@ -164,7 +180,7 @@ def process_folder(folder_path: str, obsidian_path: str, log_box):
                 "author": first_author,
                 "year": metadata["year"],
                 "abstract": abstract,
-                "md_path": Path(obsidian_path) / f"{safe_title}.md",
+                "md_path": actual_md_path,   # ← real path, not a guess
             })
 
             stats["success"] += 1
@@ -185,25 +201,99 @@ def process_folder(folder_path: str, obsidian_path: str, log_box):
             f"Failed: {stats['failed']}, Duplicates: {stats['duplicates']}\n"
         )
 
-    return stats, dict(keyword_freq), processed_papers
+    # Deduplicate before handing off to the keyword stage.
+    # _deduplicate_concepts returns a sorted list of (concept, count) tuples.
+    deduped = _deduplicate_concepts(keyword_freq, min_count=2)
+    return stats, dict(deduped), processed_papers
 
 
-def _extract_candidate_words(text: str) -> list[str]:
+# ══════════════════════════════════════════════════════════════════════════════
+# KEYWORD EXTRACTION ENGINE  (ported from link_analyze.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Placeholder strings that mean "no abstract" — skip these entirely
+_ABSTRACT_PLACEHOLDERS = {"no abstract available", "abstract available", "no abstract"}
+
+_STOP_WORDS = {
+    'of', 'in', 'to', 'for', 'with', 'on', 'at', 'by', 'from', 'is', 'are', 'was', 'were',
+    'the', 'a', 'an', 'and', 'or', 'as', 'be', 'been', 'being', 'it', 'its', 'this', 'that',
+    'which', 'who', 'these', 'those', 'we', 'our', 'their', 'they', 'into', 'has', 'have',
+    'not', 'but', 'than', 'more', 'also', 'such', 'very', 'can', 'may', 'however', 'during',
+    'specific', 'factor', 'identified', 'using', 'well', 'both', 'between', 'through',
+    'here', 'there', 'results', 'associated', 'increased', 'decreased', 'showed', 'highly',
+    'potential', 'level', 'levels', 'significant', 'role', 'roles', 'expression', 'cells',
+    'muscle', 'genes', 'protein', 'response', 'human', 'show', 'shows', 'shown', 'including',
+    'study', 'used', 'data', 'analysis', 'clinical', 'molecular',
+}
+
+_ACADEMIC_NOISE = {
+    'role in', 'roles in', 'response to', 'in response', 'understanding of',
+    'we found', 'development of', 'involved in', 'loss of', 'associated with',
+    'it is', 'there is', 'due to', 'well as', 'as well as', 'here we', 'shown to',
+    'plays a', 'play a', 'the expression', 'expression of', 'levels of',
+}
+
+
+def _clean_text_for_keywords(text: str) -> list[str]:
+    """Tokenise text, discarding placeholders. Returns a list of lowercase tokens."""
+    if not text:
+        return []
+    if any(p in text.lower() for p in _ABSTRACT_PLACEHOLDERS):
+        return []
+    text = re.sub(r'[/\\-]', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]', '', text)
+    return text.lower().split()
+
+
+def _is_valid_gram(gram_list: list[str]) -> bool:
+    """Return True if an n-gram is a valid concept candidate."""
+    gram_str = " ".join(gram_list)
+    if gram_list[0] in _STOP_WORDS or gram_list[-1] in _STOP_WORDS:
+        return False
+    if gram_str in _ACADEMIC_NOISE:
+        return False
+    if len(gram_str) < 3 or gram_str in _STOP_WORDS:
+        return False
+    return True
+
+
+def _deduplicate_concepts(freq: Counter, min_count: int = 2) -> list[tuple[str, int]]:
     """
-    Very simple keyword harvesting: lowercase words longer than 5 chars,
-    excluding a basic stopword list.
-    Replace this with your own keyword logic!
+    Mirror the deduplication logic from link_analyze.py:
+    - Prefer longer n-grams over sub-strings they contain, unless the shorter
+      form is much more frequent (>1.5× the longer one).
+    - Filter by min_count.
+    - Sort by (length DESC, count DESC) then re-sort by count for final output.
     """
-    stopwords = {
-        "about", "above", "after", "again", "against", "these", "their",
-        "there", "which", "where", "while", "through", "between", "because",
-        "being", "would", "could", "should", "other", "those", "within",
-        "during", "following", "however", "therefore", "although", "whether",
-        "using", "study", "results", "patients", "associated", "significant",
-        "analysis", "compared", "found", "among", "based", "increased",
-    }
-    words = re.findall(r"\b[a-zA-Z]{5,}\b", text.lower())
-    return [w for w in words if w not in stopwords]
+    seen: set[str] = set()
+    candidates = sorted(freq.items(), key=lambda x: (len(x[0]), x[1]), reverse=True)
+    result = []
+    for concept, count in candidates:
+        if count < min_count:
+            continue
+        is_redundant = any(
+            concept in longer and freq[longer] * 1.5 >= count
+            for longer in seen
+        )
+        if not is_redundant:
+            seen.add(concept)
+            result.append((concept, count))
+    result.sort(key=lambda x: x[1], reverse=True)
+    return result
+
+
+def extract_keywords_from_text(text: str) -> Counter:
+    """
+    Full pipeline: tokenise → build 1/2/3-grams → filter → return Counter.
+    Call this once per abstract/title; aggregate the Counters across papers.
+    """
+    tokens = _clean_text_for_keywords(text)
+    counts: Counter = Counter()
+    for n in [1, 2, 3]:
+        grams = [tokens[i:i+n] for i in range(len(tokens) - n + 1)]
+        valid = [" ".join(g) for g in grams if _is_valid_gram(g)]
+        counts.update(valid)
+    return counts
 
 
 def _render_log(log_box):
@@ -281,23 +371,32 @@ def page_processing():
 
     log_box = st.empty()
 
-    with st.spinner("Working…"):
-        stats, keyword_freq, processed_papers = process_folder(
-            st.session_state.folder_path,
-            st.session_state.obsidian_path,
-            log_box,
-        )
+    # Guard: only run the heavy processing once.
+    # On any subsequent rerun (e.g. button click), skip straight to showing results.
+    if not st.session_state.processing_done:
+        with st.spinner("Working…"):
+            stats, keyword_freq, processed_papers = process_folder(
+                st.session_state.folder_path,
+                st.session_state.obsidian_path,
+                log_box,
+            )
+        st.session_state.stats            = stats
+        st.session_state.keyword_freq     = keyword_freq
+        st.session_state.processed_papers = processed_papers
+        st.session_state.processing_done  = True
 
-    st.session_state.stats             = stats
-    st.session_state.keyword_freq      = keyword_freq
-    st.session_state.processed_papers  = processed_papers
+    # Always render the stored log so it stays visible
+    _render_log(log_box)
+
+    stats        = st.session_state.stats
+    keyword_freq = st.session_state.keyword_freq
 
     # Summary metrics
     st.divider()
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Processed",   stats["processed"])
-    c2.metric("✅ Success",   stats["success"])
-    c3.metric("❌ Failed",    stats["failed"])
+    c1.metric("Processed",    stats["processed"])
+    c2.metric("✅ Success",    stats["success"])
+    c3.metric("❌ Failed",     stats["failed"])
     c4.metric("⚠️ Duplicates", stats["duplicates"])
 
     if keyword_freq:
@@ -327,9 +426,10 @@ def page_keywords():
     # ── Controls ──────────────────────────────────────────────────────────────
     col_a, col_b, col_c = st.columns([2, 1, 1])
     with col_a:
-        min_count = st.slider("Minimum occurrences to show", 1, max(freq.values(), default=1), 2)
+        max_freq = max(freq.values()) if freq else 2
+        min_count = st.slider("Minimum occurrences to show", 1, max(max_freq, 2), 2)
     with col_b:
-        sort_by = st.selectbox("Sort by", ["Frequency ↓", "Alphabetical"])
+        sort_by = st.selectbox("Sort by", ["Frequency ↓", "Length + Frequency ↓", "Alphabetical"])
     with col_c:
         st.write("")  # spacer
         if st.button("Clear selection"):
@@ -340,6 +440,8 @@ def page_keywords():
     filtered = {w: c for w, c in freq.items() if c >= min_count}
     if sort_by == "Frequency ↓":
         sorted_words = sorted(filtered.items(), key=lambda x: -x[1])
+    elif sort_by == "Length + Frequency ↓":
+        sorted_words = sorted(filtered.items(), key=lambda x: (len(x[0]), x[1]), reverse=True)
     else:
         sorted_words = sorted(filtered.items(), key=lambda x: x[0])
 

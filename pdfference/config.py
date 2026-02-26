@@ -5,7 +5,10 @@ Use environment variables to override defaults.
 import os
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
 
+# ← ADD THIS AT THE TOP
+load_dotenv()
 
 class Config:
     """Single source of truth for all settings."""

@@ -141,7 +141,7 @@ class KeywordExtractor:
     
     def _tokenize(self, text: str) -> list[str]:
         """
-        Tokenize text with placeholder filtering.
+        Tokenize text with placeholder filtering and Unicode normalization.
         
         Args:
             text: Text to tokenize
@@ -155,6 +155,13 @@ class KeywordExtractor:
             for placeholder in self.config.ABSTRACT_PLACEHOLDERS
         ):
             return []
+        
+        # Normalize superscripts and subscripts to regular characters
+        # e.g., ⁶ → 6, ₆ → 6, ᶜ → c, ᴬ → A
+        text = ''.join(
+            self._normalize_unicode_char(char)
+            for char in text
+        )
         
         # Normalize separators (hyphens, slashes become spaces)
         text = re.sub(r'[/\\-]', ' ', text)
@@ -189,6 +196,42 @@ class KeywordExtractor:
             return False
         
         return True
+    
+    @staticmethod
+    def _normalize_unicode_char(char: str) -> str:
+        """
+        Convert Unicode superscripts and subscripts to normal characters.
+        
+        Args:
+            char: Single character to normalize
+        
+        Returns:
+            Normalized character
+        """
+        # Superscript mappings
+        superscript_map = {
+            '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5',
+            '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+            'ᴬ': 'A', 'ᴮ': 'B', 'ᴰ': 'D', 'ᴱ': 'E', 'ᴳ': 'G', 'ᴴ': 'H',
+            'ᴵ': 'I', 'ᴶ': 'J', 'ᴷ': 'K', 'ᴸ': 'L', 'ᴹ': 'M', 'ᴺ': 'N',
+            'ᴼ': 'O', 'ᴾ': 'P', 'ᴿ': 'R', 'ˢ': 'S', 'ᵀ': 'T', 'ᴰ': 'D',
+            'ᵁ': 'U', 'ᵀ': 'T', 'ⁿ': 'n', 'ˣ': 'x', 'ʸ': 'y', 'ᶜ': 'c',
+            'ᴬ': 'a', 'ᵇ': 'b', 'ᶜ': 'c', 'ᵈ': 'd', 'ᵉ': 'e', 'ᶠ': 'f',
+            'ᵍ': 'g', 'ʰ': 'h', 'ⁱ': 'i', 'ʲ': 'j', 'ᵏ': 'k', 'ˡ': 'l',
+            'ᵐ': 'm', 'ⁿ': 'n', 'ᵒ': 'o', 'ᵖ': 'p', 'ʳ': 'r', 'ˢ': 's',
+            'ᵗ': 't', 'ᵘ': 'u', 'ᵛ': 'v', 'ʷ': 'w', 'ˣ': 'x', 'ʸ': 'y',
+            'ᶻ': 'z', 'ᶜ': 'c', 'ᵐ': 'm',
+        }
+        
+        # Subscript mappings
+        subscript_map = {
+            '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5',
+            '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+            'ₐ': 'a', 'ₑ': 'e', 'ᵢ': 'i', 'ₒ': 'o', 'ᵤ': 'u', 'ₓ': 'x',
+            'ₙ': 'n', 'ₘ': 'm', 'ₕ': 'h', 'ₚ': 'p', 'ₜ': 't', 'ₛ': 's',
+        }
+        
+        return superscript_map.get(char, subscript_map.get(char, char))
     
     @staticmethod
     def _extract_section(content: str, header: str) -> str:

@@ -84,17 +84,17 @@ class MetadataFetcher:
             
             return Paper(
                 doi=data.get("DOI", ""),
-                title=data.get("title", [""])[0],
+                title=(data.get("title", []) or [""])[0],
                 authors=[
                     f"{a.get('family', '')}, {a.get('given', '')}"
                     for a in data.get("author", [])
                 ],
-                year=data.get("issued", {}).get("date-parts", [[None]])[0][0],
+                year=(data.get("issued", {}).get("date-parts", [[None]]) or [[None]])[0][0],
                 abstract=data.get("abstract", "") or "",
-                journal=data.get("container-title", [""])[0],
+                journal=(data.get("container-title", []) or [""])[0],
                 url=data.get("URL", f"https://doi.org/{doi}"),
             )
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, IndexError, KeyError, TypeError) as e:
             self.logger.debug(f"CrossRef error: {e}")
             return None
     

@@ -85,20 +85,38 @@ def page_select():
     col1, col2 = st.columns(2)
     
     with col1:
+        st.subheader("📁 PDF Folder")
         default_pdf = str(Config.PDF_FOLDER) if Config.PDF_FOLDER else ""
-        st.session_state.folder_path = st.text_input(
-            "📁 PDF Folder (containing PDFs to process)",
-            st.session_state.folder_path or default_pdf,
-            help="Folder with unsorted PDFs"
+        folder_input = st.text_input(
+            "Paste the full path to the folder containing your PDFs",
+            value=st.session_state.folder_path or default_pdf,
+            placeholder=r"C:\Users\you\Documents\Unsorted",
         )
+        st.session_state.folder_path = folder_input
+        
+        # Live PDF count check
+        if folder_input:
+            p = Path(folder_input)
+            if p.is_dir():
+                pdf_count = len(list(p.glob("*.pdf")))
+                st.success(f"✅ Found **{pdf_count}** PDF(s) in this folder")
+            else:
+                st.warning("⚠️ Path doesn't exist or isn't a folder")
     
     with col2:
+        st.subheader("🗒️ Obsidian Vault Path")
         default_vault = str(Config.VAULT_PATH)
-        st.session_state.obsidian_path = st.text_input(
-            "🧠 Obsidian Vault Path",
-            st.session_state.obsidian_path or default_vault,
-            help="Where to save Markdown notes"
+        vault_input = st.text_input(
+            "Paste the path where Obsidian notes should be saved",
+            value=st.session_state.obsidian_path or default_vault,
+            placeholder=r"G:\Mi unidad\Input_network\Input_network",
         )
+        st.session_state.obsidian_path = vault_input
+        
+        # Vault path validation
+        if vault_input:
+            if not Path(vault_input).is_dir():
+                st.warning("⚠️ Path doesn't exist or isn't a folder")
     
     st.markdown("---")
     
@@ -313,9 +331,16 @@ def page_linking():
         st.success("✅ Wikilinks applied successfully!")
     
     st.markdown("---")
-    if st.button("✨ Complete", use_container_width=True, type="primary"):
-        st.balloons()
-        advance_to("select")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("← Back to Keywords", use_container_width=True):
+            advance_to("keywords")
+    with col2:
+        if st.button("✨ Complete", use_container_width=True, type="primary"):
+            st.balloons()
+            advance_to("select")
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

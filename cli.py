@@ -1,0 +1,234 @@
+"""
+PDFerence CLI: Standalone command-line interface.
+Reuses all core/ modules without Streamlit dependency.
+"""
+import argparse
+import sys
+from pathlib import Path
+from typing import Optional
+
+from pdfference.config import Config
+from pdfference.core.pdf_processor import PDFProcessor
+from pdfference.core.metadata_fetcher import MetadataFetcher
+from pdfference.core.note_generator import NoteGenerator
+from pdfference.core.linker import Linker
+from pdfference.core.models import ProcessingStats, ProcessingResult
+from pdfference.analysis.keyword_extractor import KeywordExtractor
+from pdfference.utils.logger import Logger
+
+
+def process_pdfs_command(args):
+    """Process PDFs in a folder."""
+    logger = Logger("CLI-ProcessPDFs", Config.LOG_DIR)
+    
+    pdf_processor = PDFProcessor(logger)
+    metadata_fetcher = MetadataFetcher(logger)
+    note_generator = NoteGenerator(logger)
+    
+    input_folder = Path(args.input_folder)
+    output_folder = Path(args.output_folder or Config.OBSIDIAN_OUTPUT)
+    
+    if not input_folder.exists():
+        logger.error(f"Input folder not found: {input_folder}")
+        return 1
+    
+    logger.info(f"Starting PDF processing: {input_folder}")
+    logger.info(f"Output folder: {output_folder}")
+    
+    stats = ProcessingStats()
+    
+    for pdf_file in sorted(input_folder.glob("*.pdf")):
+        stats.processed += 1
+        logger.info(f"Processing {pdf_file.name} ({stats.processed})...")
+        
+        # Extract DOI
+        doi = pdf_processor.extract_doi_from_pdf(pdf_file)
+        if not doi:
+            logger.warning(f"No DOI found in {pdf_file.name}")
+            stats.failed += 1
+            continue
+        
+        # Fetch metadata
+        paper = metadata_fetcher.fetch(doi)
+        if not paper:
+            logger.warning(f"Failed to fetch metadata for {doi}")
+            stats.failed += 1
+            continue
+        
+        # Save note
+        try:
+            note_path = note_generator.save_note(paper, output_folder)
+            stats.success += 1
+        except Exception as e:
+            logger.error(f"Failed to save note: {e}")
+            stats.failed += 1
+    
+    logger.info(f"Processing complete: {stats}")
+    return 0 if stats.failed == 0 else 1
+
+
+def extract_keywords_command(args):
+    """Extract keywords from vault."""
+    logger = Logger("CLI-ExtractKeywords", Config.LOG_DIR)
+    
+    extractor = KeywordExtractor(logger)
+    
+    vault_path = Path(args.vault or Config.VAULT_PATH)
+    if not vault_path.exists():
+        logger.error(f"Vault not found: {vault_path}")
+        return 1
+    
+    logger.info(f"Extracting keywords from: {vault_path}")
+    
+    # Extract
+    freq = extractor.extract_from_vault(
+        vault_path,
+        target_header=args.header or "Abstract"
+    )
+    
+    # Deduplicate
+    deduplicated = extractor.deduplicate(freq, min_count=args.min_count)
+    
+    # Output
+    output_file = args.output or "keywords.csv"
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("keyword,frequency\n")
+            for word, count in deduplicated[:args.limit]:
+                f.write(f'"{word}",{count}\n')
+        
+        logger.success(f"Keywords exported to {output_file}")
+        return 0
+    except Exception as e:
+        logger.error(f"Failed to export: {e}")
+        return 1
+
+
+def apply_links_command(args):
+    """Apply wikilinks to vault."""
+    logger = Logger("CLI-ApplyLinks", Config.LOG_DIR)
+    
+    linker = Linker(logger)
+    
+    vault_path = Path(args.vault or Config.VAULT_PATH)
+    if not vault_path.exists():
+        logger.error(f"Vault not found: {vault_path}")
+        return 1
+    
+    # Load keywords from file or use defaults
+    if args.keywords_file:
+        try:
+            keywords = set()
+            with open(args.keywords_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("keyword"):
+                        # CSV format: "keyword",count
+                        keyword = line.split(',')[0].strip('"').strip()
+                        if keyword:
+                            keywords.add(keyword)
+            logger.info(f"Loaded {len(keywords)} keywords from {args.keywords_file}")
+        except Exception as e:
+            logger.error(f"Failed to load keywords file: {e}")
+            return 1
+    else:
+        keywords = set(Config.KEYWORDS_TO_LINK)
+        logger.info(f"Using default {len(keywords)} keywords")
+    
+    # Apply
+    processed, modified = linker.apply_links_to_vault(vault_path, keywords)
+    logger.info(f"Applied links: {modified}/{processed} files modified")
+    
+    return 0
+
+
+def main():
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="PDFerence: PDF metadata processor with Obsidian integration"
+    )
+    
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # process-pdfs command
+    # ─────────────────────────────────────────────────────────────────────────
+    process_parser = subparsers.add_parser(
+        "process-pdfs",
+        help="Process PDFs and extract metadata"
+    )
+    process_parser.add_argument(
+        "input_folder",
+        help="Folder containing PDFs to process"
+    )
+    process_parser.add_argument(
+        "-o", "--output-folder",
+        help=f"Output folder for notes (default: {Config.OBSIDIAN_OUTPUT})"
+    )
+    process_parser.set_defaults(func=process_pdfs_command)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # extract-keywords command
+    # ─────────────────────────────────────────────────────────────────────────
+    keywords_parser = subparsers.add_parser(
+        "extract-keywords",
+        help="Extract keywords from vault"
+    )
+    keywords_parser.add_argument(
+        "-v", "--vault",
+        help=f"Vault path (default: {Config.VAULT_PATH})"
+    )
+    keywords_parser.add_argument(
+        "--header",
+        default="Abstract",
+        help="Section header to extract from (default: Abstract)"
+    )
+    keywords_parser.add_argument(
+        "-m", "--min-count",
+        type=int,
+        default=2,
+        help="Minimum occurrences (default: 2)"
+    )
+    keywords_parser.add_argument(
+        "-l", "--limit",
+        type=int,
+        default=100,
+        help="Top N keywords to export (default: 100)"
+    )
+    keywords_parser.add_argument(
+        "-o", "--output",
+        default="keywords.csv",
+        help="Output CSV file (default: keywords.csv)"
+    )
+    keywords_parser.set_defaults(func=extract_keywords_command)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # apply-links command
+    # ─────────────────────────────────────────────────────────────────────────
+    links_parser = subparsers.add_parser(
+        "apply-links",
+        help="Apply wikilinks to vault"
+    )
+    links_parser.add_argument(
+        "-v", "--vault",
+        help=f"Vault path (default: {Config.VAULT_PATH})"
+    )
+    links_parser.add_argument(
+        "-k", "--keywords-file",
+        help="CSV file with keywords (from extract-keywords)"
+    )
+    links_parser.set_defaults(func=apply_links_command)
+    
+    # Parse and execute
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return 1
+    
+    Config.ensure_dirs()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

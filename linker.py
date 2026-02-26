@@ -15,9 +15,9 @@ KEYWORDS_TO_LINK = [
     'Autophagy',
     'm6A',
     'Notch',
-    "Cancer"
+    "Cancer",
     "Development", 
-     "Proliferation"
+    "Proliferation"
 ]
 
 def apply_links_to_content(content, keywords):

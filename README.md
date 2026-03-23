@@ -1,6 +1,6 @@
 # PDFerence: PDF Metadata Processor with Obsidian Integration
 
-A professional-grade tool for processing academic PDFs, extracting metadata via CrossRef/OpenAlex/PubMed APIs, and creating linked notes in your Obsidian vault.
+A tool for processing academic PDFs, extracting metadata via CrossRef/OpenAlex/PubMed APIs, and creating linked notes in your Obsidian vault.
 
 ## Architecture Refactoring (v0.2)
 

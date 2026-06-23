@@ -14,6 +14,7 @@ from pdfference.core.metadata_fetcher import MetadataFetcher
 from pdfference.core.note_generator import NoteGenerator
 from pdfference.core.linker import Linker
 from pdfference.core.keyword_store import KeywordStore
+from pdfference.core.setup import setup_automated
 from pdfference.core.models import ProcessingStats, ProcessingResult
 from pdfference.analysis.keyword_extractor import KeywordExtractor
 from pdfference.utils.logger import Logger
@@ -256,6 +257,34 @@ def reindex_vault_command(args):
     return 0
 
 
+def setup_command(args):
+    """Automated setup: process PDFs → extract keywords → review → apply links."""
+    pdf_folder = Path(args.input_folder)
+    output_folder = Path(args.output_folder) if args.output_folder else None
+
+    if not pdf_folder.exists():
+        print(f"Error: Input folder not found: {pdf_folder}")
+        return 1
+
+    results = setup_automated(
+        pdf_folder=pdf_folder,
+        output_folder=output_folder,
+        min_keyword_count=args.min_count,
+        keyword_limit=args.limit,
+    )
+
+    print("\n" + "="*60)
+    print("Setup Complete!")
+    print("="*60)
+    print(f"PDFs processed: {results['pdfs_processed']}")
+    print(f"Keywords extracted: {results['keywords_extracted']}")
+    print(f"Keywords approved: {results['keywords_approved']}")
+    print(f"Files modified: {results['files_modified']}")
+    print("="*60)
+
+    return 0
+
+
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -389,8 +418,38 @@ def main():
         help=f"Vault path (default: {Config.VAULT_PATH})"
     )
     reindex_parser.set_defaults(func=reindex_vault_command)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # setup command
+    # ─────────────────────────────────────────────────────────────────────────
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Automated setup: process PDFs → extract keywords → review → apply links"
+    )
+    setup_parser.add_argument(
+        "input_folder",
+        help="Folder containing PDFs to process"
+    )
+    setup_parser.add_argument(
+        "-o", "--output-folder",
+        help="Output folder for vault (default: ./output/)"
+    )
+    setup_parser.add_argument(
+        "-m", "--min-count",
+        type=int,
+        default=2,
+        help="Minimum keyword occurrences (default: 2)"
+    )
+    setup_parser.add_argument(
+        "-l", "--limit",
+        type=int,
+        default=50,
+        help="Maximum keywords to review (default: 50)"
+    )
+    setup_parser.set_defaults(func=setup_command)
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         return 1

@@ -134,3 +134,52 @@ class Linker:
         
         self.logger.info(f"Linker complete: {modified}/{processed} files modified")
         return processed, modified
+
+    def merge_keywords_in_vault(
+        self,
+        vault_path: Path,
+        source_keyword: str,
+        target_keyword: str,
+    ) -> int:
+        """
+        Replace all occurrences of source keyword with target keyword in vault.
+        Updates [[source]] -> [[target]] and [[source|alias]] -> [[target|alias]]
+
+        Args:
+            vault_path: Root path of vault
+            source_keyword: Keyword to replace
+            target_keyword: Keyword to replace with
+
+        Returns:
+            Count of files modified
+        """
+        vault_path = Path(vault_path)
+        if not vault_path.exists():
+            self.logger.error(f"Vault path not found: {vault_path}")
+            return 0
+
+        modified = 0
+
+        for md_file in vault_path.rglob("*.md"):
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                original = content
+
+                # Pattern 1: [[source]] -> [[target]]
+                pattern1 = rf"\[\[{re.escape(source_keyword)}\]\]"
+                content = re.sub(pattern1, f"[[{target_keyword}]]", content)
+
+                # Pattern 2: [[source|alias]] -> [[target|alias]]
+                pattern2 = rf"\[\[{re.escape(source_keyword)}\|([^\]]+)\]\]"
+                content = re.sub(pattern2, f"[[{target_keyword}|\\1]]", content)
+
+                if content != original:
+                    md_file.write_text(content, encoding="utf-8")
+                    modified += 1
+                    self.logger.info(f"Merged keyword in {md_file.name}")
+
+            except Exception as e:
+                self.logger.error(f"Failed to merge keywords in {md_file.name}: {e}")
+
+        self.logger.info(f"Keyword merge complete: {modified} files modified")
+        return modified

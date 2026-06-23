@@ -14,14 +14,16 @@ pdfference/
 │   ├── pdf_processor.py   # ✅ DOI extraction + file organization
 │   ├── metadata_fetcher.py # ✅ Unified API integration (CrossRef→OpenAlex→PubMed)
 │   ├── note_generator.py  # ✅ Markdown note creation
-│   └── linker.py          # ✅ Shared wikilink injection logic
+│   ├── linker.py          # ✅ Shared wikilink injection logic
+│   ├── keyword_store.py   # ✅ Keyword persistence + management (add/remove/rename)
+│   └── setup.py           # ✅ Automated workflow orchestration
 ├── analysis/
 │   └── keyword_extractor.py # ✅ N-gram extraction + deduplication
 ├── utils/
 │   └── logger.py          # ✅ Unified logging system
 └── ui/
-    └── app.py             # ✅ Streamlit UI (pure presentation)
-cli.py                      # ✅ Standalone CLI tool
+    └── app.py             # ✅ Streamlit UI (3 pages: home, setup, keyword management)
+cli.py                      # ✅ Standalone CLI tool (7 commands including setup)
 ```
 
 ### Key Improvements
@@ -65,23 +67,23 @@ cp .env.example .env
 streamlit run pdfference/ui/app.py
 ```
 
-Then:
-1. **Select** folder with PDFs and vault path
-2. **Process** PDFs → extracts metadata, creates notes
-3. **Extract Keywords** from vault abstracts
-4. **Apply Wikilinks** to create [[links]]
+Then navigate through three main pages:
+
+1. **Home Dashboard** - View keyword stats, vault status, quick actions
+2. **Setup Workflow** - Automated: process PDFs → extract keywords → interactive review → apply links
+3. **Keyword Management** - Add/remove/rename keywords, reindex vault
 
 ### Using the CLI
 
 ```bash
-# Process PDFs to notes
+# Automated setup (fastest way to get started)
+python cli.py setup "path/to/pdfs" -o "path/to/vault"
+
+# Or use individual commands:
 python cli.py process-pdfs "path/to/pdfs" -o "path/to/vault"
-
-# Extract keywords to CSV
 python cli.py extract-keywords -v "path/to/vault" -o keywords.csv
-
-# Apply wikilinks using keyword file
 python cli.py apply-links -v "path/to/vault" -k keywords.csv
+python cli.py reindex-vault -v "path/to/vault"
 ```
 
 ### Using Python API Directly
@@ -178,7 +180,32 @@ linker.apply_links_to_file(Path("note.md"), {"keyword1", "keyword2"})
 processed, modified = linker.apply_links_to_vault(vault_path, keywords)
 ```
 
-### `analysis/keyword_extractor.py`
+### `core/keyword_store.py`
+Persist and manage approved keywords:
+```python
+store = KeywordStore()
+# Add/remove keywords
+store.add_keyword("machine learning")
+store.remove_keyword("deep learning")
+# Rename keyword
+store.rename_keyword("ML", "machine learning")
+# Retrieve all keywords
+all_keywords = store.get_all_keywords()
+# Persistence
+store.save()
+```
+
+### `core/setup.py`
+Automated workflow: process PDFs → extract keywords → review → link:
+```python
+results = setup_automated(
+    pdf_folder=Path("./papers"),
+    output_folder=Path("./vault"),
+    min_keyword_count=2,
+    keyword_limit=50
+)
+# Returns: {pdfs_processed, keywords_extracted, keywords_approved, files_modified}
+```
 Extract n-grams from abstracts:
 ```python
 extractor = KeywordExtractor(logger)
@@ -202,7 +229,78 @@ output = logger.get_ui_output()  # For Streamlit
 
 ---
 
-## Testing
+## Keyword Management
+
+### Overview
+
+Keywords are the foundation of the wikilink system. PDFerence supports:
+
+1. **Automatic Extraction**: Extract n-grams from vault abstracts
+2. **Manual Approval**: Review and approve keywords interactively
+3. **Persistent Storage**: Keywords saved to `keywords_store.json` for incremental scans
+4. **CRUD Operations**: Add, remove, rename keywords via CLI or UI
+
+### Workflows
+
+#### CLI: Setup Command (Recommended for new vaults)
+
+```bash
+python cli.py setup /path/to/pdfs -o /path/to/vault -m 2 -l 50
+```
+
+This automates the entire flow:
+1. Processes PDFs → creates notes
+2. Extracts keywords from abstracts
+3. Shows [y/n/skip] prompts for each keyword
+4. Applies wikilinks using approved keywords
+5. Saves keywords to persistent store
+
+#### CLI: Review & Reindex (for incremental scans)
+
+```bash
+# Find new keywords in papers added since last scan
+python cli.py scan-new-papers -v /path/to/vault -m 2
+
+# Review and approve new keywords
+python cli.py review-keywords -v /path/to/vault -l 50
+
+# Re-apply all approved keywords to entire vault
+python cli.py reindex-vault -v /path/to/vault
+```
+
+#### UI: Keyword Management Dashboard
+
+1. Start from **Keyword Management** page
+2. View all current keywords
+3. **Add keyword**: Type name + click Add
+4. **Remove keyword**: Click Remove (confirm with second click)
+5. **Rename keyword**: Click Rename, enter new name, confirm
+6. **Reindex vault**: Apply all keywords to vault files
+
+### Keyword Store
+
+Keywords are stored in `keywords_store.json`:
+
+```json
+{
+  "keywords": {
+    "machine learning": {
+      "date_added": "2026-06-23T15:30:00",
+      "status": "approved"
+    },
+    "neural networks": {
+      "date_added": "2026-06-23T15:30:05",
+      "status": "approved"
+    }
+  },
+  "last_scan": "2026-06-23T15:35:00",
+  "metadata": {}
+}
+```
+
+When you add/remove/rename keywords via UI or CLI, the store is automatically updated and persisted.
+
+---
 
 ```bash
 # Run all tests

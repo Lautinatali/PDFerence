@@ -95,7 +95,60 @@ class KeywordExtractor:
         
         self.logger.info(f"Extracted {len(all_counts)} unique keywords from vault")
         return all_counts
-    
+
+    def extract_new_papers(
+        self,
+        vault_path: Path,
+        since_date: Optional[str] = None,
+        min_gram: int = 1,
+        max_gram: int = 3
+    ) -> tuple[Counter, list[Path]]:
+        """
+        Extract keywords from papers added after `since_date`.
+
+        Args:
+            vault_path: Root path of vault
+            since_date: ISO date string (e.g., "2026-06-20")
+            min_gram: Minimum gram size
+            max_gram: Maximum gram size
+
+        Returns:
+            Tuple of (keyword_counter, list_of_new_paper_paths)
+        """
+        vault_path = Path(vault_path)
+        if not vault_path.exists():
+            self.logger.error(f"Vault path not found: {vault_path}")
+            return Counter(), []
+
+        all_counts = Counter()
+        new_papers = []
+
+        for md_file in vault_path.rglob("*.md"):
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                date_added = self._extract_date_from_frontmatter(content)
+
+                # Check if paper is newer than cutoff date
+                if since_date and date_added:
+                    if date_added < since_date:
+                        continue
+
+                # Extract from both title and abstract
+                title = self._extract_title_from_frontmatter(content)
+                section_text = self._extract_section(content, "Abstract")
+                combined = f"{title} {section_text}"
+
+                counts = self.extract(combined, min_gram, max_gram)
+                all_counts.update(counts)
+                new_papers.append(md_file)
+
+            except Exception as e:
+                self.logger.debug(f"Error processing {md_file.name}: {e}")
+                continue
+
+        self.logger.info(f"Extracted {len(all_counts)} unique keywords from {len(new_papers)} new papers")
+        return all_counts, new_papers
+
     def deduplicate(
         self,
         freq: Counter,
@@ -232,7 +285,17 @@ class KeywordExtractor:
         }
         
         return superscript_map.get(char, subscript_map.get(char, char))
-    
+
+    def _extract_date_from_frontmatter(self, content: str) -> Optional[str]:
+        """Extract date_added from YAML frontmatter."""
+        match = re.search(r'^date_added:\s*(.+)$', content, re.MULTILINE)
+        return match.group(1).strip() if match else None
+
+    def _extract_title_from_frontmatter(self, content: str) -> str:
+        """Extract title from YAML frontmatter."""
+        match = re.search(r'^title:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
+        return match.group(1).strip() if match else ""
+
     @staticmethod
     def _extract_section(content: str, header: str) -> str:
         """

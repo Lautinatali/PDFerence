@@ -6,12 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from pdfference.config import Config
 from pdfference.core.pdf_processor import PDFProcessor
 from pdfference.core.metadata_fetcher import MetadataFetcher
 from pdfference.core.note_generator import NoteGenerator
 from pdfference.core.linker import Linker
+from pdfference.core.keyword_store import KeywordStore
 from pdfference.core.models import ProcessingStats, ProcessingResult
 from pdfference.analysis.keyword_extractor import KeywordExtractor
 from pdfference.utils.logger import Logger
@@ -138,7 +140,119 @@ def apply_links_command(args):
     # Apply
     processed, modified = linker.apply_links_to_vault(vault_path, keywords)
     logger.info(f"Applied links: {modified}/{processed} files modified")
-    
+
+    return 0
+
+
+def scan_new_papers_command(args):
+    """Scan papers added since last scan for new keywords."""
+    logger = Logger("CLI-ScanNewPapers", Config.LOG_DIR)
+    extractor = KeywordExtractor(logger)
+    store = KeywordStore()
+
+    vault_path = Path(args.vault or Config.VAULT_PATH)
+    since_date = store.get_last_scan()
+
+    if not vault_path.exists():
+        logger.error(f"Vault not found: {vault_path}")
+        return 1
+
+    logger.info(f"Scanning for papers added since {since_date or 'beginning'}")
+
+    freq, new_papers = extractor.extract_new_papers(vault_path, since_date)
+
+    if not new_papers:
+        logger.info("No new papers found")
+        return 0
+
+    logger.info(f"Found {len(new_papers)} new papers")
+
+    known = store.get_all_keywords()
+    candidates = [
+        (word, count) for word, count in freq.most_common()
+        if word not in known and count >= args.min_count
+    ]
+
+    if not candidates:
+        logger.info("No new keyword candidates found")
+        return 0
+
+    logger.info(f"\n📊 Found {len(candidates)} new keyword candidates:")
+    for word, count in candidates[:20]:
+        print(f"  • {word}: {count} occurrences")
+
+    return 0
+
+
+def review_keywords_command(args):
+    """Interactively approve new keywords."""
+    logger = Logger("CLI-ReviewKeywords", Config.LOG_DIR)
+    extractor = KeywordExtractor(logger)
+    store = KeywordStore()
+
+    vault_path = Path(args.vault or Config.VAULT_PATH)
+    if not vault_path.exists():
+        logger.error(f"Vault not found: {vault_path}")
+        return 1
+
+    since_date = store.get_last_scan()
+
+    freq, _ = extractor.extract_new_papers(vault_path, since_date)
+    known = store.get_all_keywords()
+    candidates = [
+        (word, count) for word, count in freq.most_common()
+        if word not in known and count >= args.min_count
+    ]
+
+    if not candidates:
+        logger.info("No new candidates to review")
+        return 0
+
+    logger.info(f"\n🔍 Review {len(candidates)} keyword candidates:")
+    approved_count = 0
+
+    for word, count in candidates[:args.limit]:
+        response = input(f"\n✓ Add '{word}' ({count} occurrences)? [y/n/skip]: ").strip().lower()
+
+        if response == 'y':
+            store.add_keyword(word)
+            approved_count += 1
+            logger.success(f"Added: {word}")
+        elif response == 'skip':
+            continue
+
+    if approved_count > 0:
+        store.set_last_scan(datetime.now().isoformat())
+        store.save()
+        logger.success(f"Approved {approved_count} new keywords")
+        logger.info(f"Total keywords now: {len(store.get_all_keywords())}")
+        return 0
+    else:
+        logger.info("No keywords approved")
+        return 1
+
+
+def reindex_vault_command(args):
+    """Re-link entire vault with current keyword set."""
+    logger = Logger("CLI-ReindexVault", Config.LOG_DIR)
+    linker = Linker(logger)
+    store = KeywordStore()
+
+    vault_path = Path(args.vault or Config.VAULT_PATH)
+    if not vault_path.exists():
+        logger.error(f"Vault not found: {vault_path}")
+        return 1
+
+    keywords = store.get_all_keywords()
+
+    if not keywords:
+        logger.error("No approved keywords found. Run 'review-keywords' first")
+        return 1
+
+    logger.info(f"Reindexing vault with {len(keywords)} keywords")
+    processed, modified = linker.apply_links_to_vault(vault_path, keywords)
+
+    logger.success(f"Reindex complete: {modified}/{processed} files modified")
     return 0
 
 
@@ -218,8 +332,63 @@ def main():
         help="CSV file with keywords (from extract-keywords)"
     )
     links_parser.set_defaults(func=apply_links_command)
-    
-    # Parse and execute
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # scan-new-papers command
+    # ─────────────────────────────────────────────────────────────────────────
+    scan_parser = subparsers.add_parser(
+        "scan-new-papers",
+        help="Scan papers added since last scan for new keywords"
+    )
+    scan_parser.add_argument(
+        "-v", "--vault",
+        help=f"Vault path (default: {Config.VAULT_PATH})"
+    )
+    scan_parser.add_argument(
+        "-m", "--min-count",
+        type=int,
+        default=2,
+        help="Minimum occurrences (default: 2)"
+    )
+    scan_parser.set_defaults(func=scan_new_papers_command)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # review-keywords command
+    # ─────────────────────────────────────────────────────────────────────────
+    review_parser = subparsers.add_parser(
+        "review-keywords",
+        help="Interactively approve new keywords"
+    )
+    review_parser.add_argument(
+        "-v", "--vault",
+        help=f"Vault path (default: {Config.VAULT_PATH})"
+    )
+    review_parser.add_argument(
+        "-m", "--min-count",
+        type=int,
+        default=2,
+        help="Minimum occurrences (default: 2)"
+    )
+    review_parser.add_argument(
+        "-l", "--limit",
+        type=int,
+        default=50,
+        help="Maximum keywords to review (default: 50)"
+    )
+    review_parser.set_defaults(func=review_keywords_command)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # reindex-vault command
+    # ─────────────────────────────────────────────────────────────────────────
+    reindex_parser = subparsers.add_parser(
+        "reindex-vault",
+        help="Re-link entire vault with all approved keywords"
+    )
+    reindex_parser.add_argument(
+        "-v", "--vault",
+        help=f"Vault path (default: {Config.VAULT_PATH})"
+    )
+    reindex_parser.set_defaults(func=reindex_vault_command)
     args = parser.parse_args()
     
     if not args.command:

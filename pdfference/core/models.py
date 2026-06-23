@@ -4,12 +4,13 @@ Domain models for PDFerence.
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 
 @dataclass
 class Paper:
     """Represents a processed academic paper."""
-    
+
     doi: str
     title: str
     authors: list[str]
@@ -18,7 +19,8 @@ class Paper:
     journal: Optional[str] = None
     url: Optional[str] = None
     topics: list[str] = field(default_factory=list)
-    
+    date_added: Optional[datetime] = None
+
     @property
     def first_author_lastname(self) -> str:
         """Extract last name of first author safely."""
@@ -26,7 +28,7 @@ class Paper:
             # Format: "LastName, FirstName" → extract before comma
             return self.authors[0].split(",")[0].strip()
         return "Unknown"
-    
+
     @property
     def display_authors(self) -> str:
         """Formatted author list for display."""

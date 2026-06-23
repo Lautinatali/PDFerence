@@ -3,6 +3,7 @@ Note generation: convert metadata to Obsidian-compatible Markdown.
 """
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from .models import Paper
 from ..config import Config
@@ -19,23 +20,25 @@ class NoteGenerator:
     def generate_markdown(self, paper: Paper) -> str:
         """
         Generate Markdown content for a paper note.
-        
+
         Args:
             paper: Paper metadata
-        
+
         Returns:
             Markdown string with YAML frontmatter
         """
         # YAML frontmatter
         authors_str = ", ".join(paper.authors) if paper.authors else "Unknown"
         topics_str = ", ".join(paper.topics) if paper.topics else ""
-        
+        date_added = paper.date_added.isoformat() if paper.date_added else datetime.now().isoformat()
+
         md = f'''---
 title: "{self._escape_yaml(paper.title)}"
 authors: [{authors_str}]
 journal: "{self._escape_yaml(paper.journal or 'Unknown')}"
 year: {paper.year or 0}
 doi: {paper.doi}
+date_added: {date_added}
 topics: [{topics_str}]
 tags: [unread]
 url: {paper.url or f"https://doi.org/{paper.doi}"}
@@ -47,7 +50,7 @@ url: {paper.url or f"https://doi.org/{paper.doi}"}
 
 # 🧠 Personal Notes
 
-- 
+-
 
 # 🔗 Why does it matter?
 '''
